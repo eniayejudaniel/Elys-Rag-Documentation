@@ -1,0 +1,50 @@
+# Import Libraries
+from dotenv import load_dotenv
+from langchain_community.document_loaders import GitbookLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_google_genai import GoogleGenerativeAI
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+
+
+# load environment variables from .env file 
+load_dotenv()
+
+def elys_rag_doc():
+    # Load Elys documentation 
+    loader = GitbookLoader("https://elys-network.gitbook.io/docs", load_all_paths=True)
+    data = loader.load()
+
+    # Split the data into chunks
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=200, keep_separator=True, is_separator_regex=False, add_start_index=True)
+    splits_data = text_splitter.split_documents(data)
+
+    # Create HuggingFaceEmbeddings and load it to FAISS vector store 
+    embeddings = HuggingFaceEmbeddings(model_name = "sentence-transformers/all-MiniLM-L12-v2")
+    vector_store = FAISS.from_documents(splits_data, embeddings)
+    retriever = vector_store.as_retriever()
+
+    # Load Google LLM model 
+    llm = GoogleGenerativeAI(model="models/text-bison-001", google_api_key=os.getenv("GOOGLE_API_TOKEN")
+
+    #Create a prompt template 
+    template = """ You are an expert at answering question on Elys Network within the context, any iniquiries asked not related to the context, reply youre limited to answer within the context and dont mention the context in your reply. but you can cite source link in your replies for users to indepth understanding of their iniquires: {context}
+    Question: {question}
+    """
+    prompt = PromptTemplate.from_template(template)
+
+    # Create an output parser
+    output_parser = StrOutputParser()
+
+    # Create a setup and retrieval 
+    setup_and_retrieval = RunnableParallel({"context": retriever, "question": RunnablePassthrough()})
+
+    # Create a chain 
+    chain = setup_and_retrieval | prompt | llm | output_parser
+    return chain
+
+#Initialize the function 
+chain = elys_rag_doc()
